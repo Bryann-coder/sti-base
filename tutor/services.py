@@ -1,127 +1,109 @@
-from expert.models import Concept, Skill
-from learner.models import LearnerProgress
-from .llm_client import GeminiClient
+from .models import *
+from .tuteur_service import SystemeTuteur, GestionSession
+from django.contrib.auth.models import User
+import uuid
 
 class TutorService:
-    def __init__(self, learner_profile):
-        self.learner = learner_profile
-        self.llm_client = GeminiClient()
-
-    def _get_or_create_progress(self, concept):
-        progress, created = LearnerProgress.objects.get_or_create(
-            learner=self.learner,
-            concept=concept
-        )
-        return progress
-
-    def _determine_next_concept(self):
-        """
-        Logique simple pour choisir le prochain concept.
-        Priorité 1: Concepts commencés mais non maîtrisés (score < 0.9).
-        Priorité 2: Nouveaux concepts dans l'ordre de l'arbre.
-        """
-        # Chercher un concept en cours avec un faible score
-        in_progress_concepts = LearnerProgress.objects.filter(
-            learner=self.learner,
-            mastery_score__lt=0.9
-        ).order_by('last_interaction_at').first()
-
-        if in_progress_concepts:
-            return in_progress_concepts.concept
-
-        # Sinon, trouver le premier concept jamais vu
-        learned_concept_ids = LearnerProgress.objects.filter(learner=self.learner).values_list('concept_id', flat=True)
+    def __init__(self, user):
+        self.user = user
+        self.utilisateur = self._get_or_create_utilisateur()
+        self.systeme_tuteur = SystemeTuteur()
+    
+    def _get_or_create_utilisateur(self):
+        """Récupère ou crée l'utilisateur du système tuteur"""
+        try:
+            return Utilisateur.objects.get(user=self.user)
+        except Utilisateur.DoesNotExist:
+            # Créer le profil utilisateur
+            profil = ProfilUtilisateur.objects.create(
+                id_profil=str(uuid.uuid4()),
+                specialite="Médecine Générale",
+                niveau_expertise="DEBUTANT",
+                niveau_app="1",
+                domaine="Santé"
+            )
+            
+            # Créer l'utilisateur
+            utilisateur = Utilisateur.objects.create(
+                id_utilisateur=str(uuid.uuid4()),
+                user=self.user,
+                nom=self.user.last_name or "Utilisateur",
+                prenom=self.user.first_name or "Nouveau",
+                email=self.user.email,
+                profil=profil
+            )
+            return utilisateur
+    
+    def handle_interaction(self, user_message, session_id=None):
+        """Point d'entrée principal pour gérer une interaction"""
         
-        # On prend le premier concept de l'arbre qui n'a pas été appris
-        # Note: une vraie logique suivrait les dépendances de l'arbre MPTT
-        next_concept = Concept.objects.exclude(id__in=learned_concept_ids).order_by('skill__tree_id', 'skill__lft', 'id').first()
-
-        return next_concept
-
-    def _build_prompt(self, concept, user_message, progress):
-        """
-        Construit le prompt pour le LLM. C'est la partie la plus créative !
-        """
-        # Récupérer un peu d'historique
-        history = progress.interaction_history[-3:] # Les 3 dernières interactions
-
-        prompt = f"""
-        Tu es un tuteur intelligent, patient et encourageant. Ton nom est "Prof".
-        Ton objectif est d'aider un apprenant à maîtriser un concept spécifique.
-
-        **Règles strictes :**
-        1.  Ne parle que du concept actuel. Ne dérive pas sur d'autres sujets.
-        2.  Utilise un langage simple et des analogies.
-        3.  Termine TOUJOURS ta réponse par une question simple pour vérifier la compréhension de l'apprenant.
-        4.  Garde tes réponses courtes et directes (2-3 phrases maximum).
-
-        ---
-        **CONTEXTE DE L'APPRENANT**
-        - Nom de l'apprenant : {self.learner.user.username}
-        - Score de maîtrise actuel sur ce concept : {progress.mastery_score:.2f}
-
-        **CONCEPT ACTUEL À ENSEIGNER**
-        - Nom du concept : {concept.name}
-        - Explication de base : {concept.explanation}
-
-        **HISTORIQUE DE LA CONVERSATION (sur ce concept)**
-        {history if history else "C'est notre première interaction sur ce sujet."}
-
-        ---
-        **DERNIER MESSAGE DE L'APPRENANT :**
-        "{user_message}"
-        ---
+        # Récupérer ou créer la session
+        session = None
+        if session_id:
+            try:
+                session = Session.objects.get(id_session=session_id, utilisateur=self.utilisateur)
+            except Session.DoesNotExist:
+                pass
         
-        Ta réponse (en tant que Prof, courte, simple, et se terminant par une question) :
-        """
-        return prompt.strip()
-
-    def _update_progress(self, progress, user_message, tutor_response):
-        """
-        Met à jour le modèle de l'apprenant après l'interaction.
-        Pour l'instant, on augmente simplement le score un peu à chaque interaction.
-        Une vraie version analyserait la réponse de l'utilisateur.
-        """
-        progress.mastery_score = min(1.0, progress.mastery_score + 0.1) # Augmentation simpliste
+        # Si pas de session, en créer une nouvelle
+        if not session:
+            niveau = self._get_or_create_niveau_defaut()
+            session = GestionSession.creer_session(self.utilisateur, niveau.id_niveau)
         
-        # Ajout à l'historique
-        progress.interaction_history.append({
-            "user": user_message,
-            "tutor": tutor_response
-        })
+        # Traiter le message avec le système tuteur
+        resultat = self.systeme_tuteur.traiter_message(self.utilisateur, user_message, session)
         
-        progress.save()
-        return progress
-
-    def handle_interaction(self, user_message):
-        """
-        Point d'entrée principal du service. Orchestre le flux.
-        """
-        # 1. Décider sur quel concept travailler
-        concept_to_teach = self._determine_next_concept()
-        print(f"====== Concept to teach : {concept_to_teach} ==========")
-        if not concept_to_teach:
-            return {
-                "tutor_response": "Félicitations ! Vous avez terminé tous les modules disponibles pour le moment.",
-                "current_concept_name": "Terminé",
-                "mastery_score": 1.0
-            }
-
-        # 2. Récupérer l'état de progression de l'apprenant sur ce concept
-        progress = self._get_or_create_progress(concept_to_teach)
-
-        effective_user_message = user_message
-        if progress.mastery_score == 0.0:
-            effective_user_message = "Commençons cette leçon."
-        # --------------------
-
-        prompt = self._build_prompt(concept_to_teach, effective_user_message, progress)
-        tutor_response_text = self.llm_client.generate_response(prompt)
-
-        updated_progress = self._update_progress(progress, user_message, tutor_response_text)
-
         return {
-            "tutor_response": tutor_response_text,
-            "current_concept_name": concept_to_teach.name,
-            "mastery_score": updated_progress.mastery_score
+            "tutor_response": resultat['reponse'],
+            "session_id": session.id_session,
+            "etoiles_gagnees": resultat['etoiles_gagnees'],
+            "score_total": resultat['score_total'],
+            "cas_clinique": resultat['cas_clinique'],
+            "niveau_actuel": session.niveau.nom
         }
+    
+    def _get_or_create_niveau_defaut(self):
+        """Crée ou récupère le niveau par défaut"""
+        niveau, created = Niveau.objects.get_or_create(
+            id_niveau="niveau_1",
+            defaults={
+                "nom": "Niveau 1 - Bases du diagnostic",
+                "description": "Apprentissage des bases du diagnostic médical",
+                "ordre": 1,
+                "nombre_etoiles_minimum": 20
+            }
+        )
+        
+        if created:
+            # Créer des étapes pour ce niveau
+            for i in range(1, 6):
+                Etape.objects.create(
+                    id_etape=f"etape_{i}",
+                    niveau=niveau,
+                    nom=f"Étape {i}",
+                    description=f"Description de l'étape {i}",
+                    ordre=i,
+                    nombre_etoiles_max=5
+                )
+        
+        return niveau
+    
+    def get_progression(self):
+        """Récupère la progression de l'utilisateur"""
+        sessions = self.utilisateur.obtenir_historique()
+        total_etoiles = sum(session.score_etoiles for session in sessions)
+        
+        return {
+            "total_etoiles": total_etoiles,
+            "sessions_completees": sessions.filter(etat_session='TERMINEE').count(),
+            "niveau_actuel": sessions.first().niveau.nom if sessions.exists() else "Aucun"
+        }
+    
+    def terminer_session(self, session_id):
+        """Termine une session"""
+        try:
+            session = Session.objects.get(id_session=session_id, utilisateur=self.utilisateur)
+            GestionSession.terminer_session(session)
+            return True
+        except Session.DoesNotExist:
+            return False
