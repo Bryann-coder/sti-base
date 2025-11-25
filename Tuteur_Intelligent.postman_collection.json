@@ -1,0 +1,422 @@
+{
+    "info": {
+        "name": "Module Tuteur Intelligent",
+        "description": "Collection complète pour tester le système tuteur médical intelligent",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "variable": [
+        {
+            "key": "BASE_URL",
+            "value": "http://localhost:8000",
+            "type": "string"
+        },
+        {
+            "key": "TOKEN",
+            "value": "",
+            "type": "string"
+        },
+        {
+            "key": "SESSION_ID",
+            "value": "",
+            "type": "string"
+        }
+    ],
+    "item": [
+        {
+            "name": "🔐 Authentification",
+            "item": [
+                {
+                    "name": "Obtenir Token",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "if (pm.response.code === 200) {",
+                                    "    const response = pm.response.json();",
+                                    "    pm.collectionVariables.set('TOKEN', response.token);",
+                                    "    console.log('Token sauvegardé:', response.token);",
+                                    "}"
+                                ]
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"username\": \"tuteur_test\",\n    \"password\": \"test123\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{BASE_URL}}/api-token-auth/",
+                            "host": ["{{BASE_URL}}"],
+                            "path": ["api-token-auth", ""]
+                        },
+                        "description": "Obtient un token d'authentification pour accéder aux APIs"
+                    }
+                }
+            ]
+        },
+        {
+            "name": "💬 Interactions Chat",
+            "item": [
+                {
+                    "name": "Première Interaction",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "if (pm.response.code === 200) {",
+                                    "    const response = pm.response.json();",
+                                    "    if (response.success && response.data.session_id) {",
+                                    "        pm.collectionVariables.set('SESSION_ID', response.data.session_id);",
+                                    "        console.log('Session ID sauvegardé:', response.data.session_id);",
+                                    "    }",
+                                    "}"
+                                ]
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Token {{TOKEN}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"message\": \"Bonjour, je commence ma formation en médecine\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{BASE_URL}}/api/tutor/chat/",
+                            "host": ["{{BASE_URL}}"],
+                            "path": ["api", "tutor", "chat", ""]
+                        },
+                        "description": "Première interaction avec le tuteur - démarre une nouvelle session"
+                    }
+                },
+                {
+                    "name": "Présenter Symptômes",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Token {{TOKEN}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"message\": \"Le patient se plaint de maux de tête intenses et de fièvre à 38.5°C depuis 2 jours\",\n    \"session_id\": \"{{SESSION_ID}}\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{BASE_URL}}/api/tutor/chat/",
+                            "host": ["{{BASE_URL}}"],
+                            "path": ["api", "tutor", "chat", ""]
+                        },
+                        "description": "Présentation des symptômes du patient"
+                    }
+                },
+                {
+                    "name": "Proposer Diagnostic",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Token {{TOKEN}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"message\": \"Avec ces symptômes, je pense à un syndrome grippal. Qu'en pensez-vous ?\",\n    \"session_id\": \"{{SESSION_ID}}\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{BASE_URL}}/api/tutor/chat/",
+                            "host": ["{{BASE_URL}}"],
+                            "path": ["api", "tutor", "chat", ""]
+                        },
+                        "description": "Proposition d'un diagnostic"
+                    }
+                },
+                {
+                    "name": "Demander Examens",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Token {{TOKEN}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"message\": \"Quels examens complémentaires recommandez-vous pour confirmer ce diagnostic ?\",\n    \"session_id\": \"{{SESSION_ID}}\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{BASE_URL}}/api/tutor/chat/",
+                            "host": ["{{BASE_URL}}"],
+                            "path": ["api", "tutor", "chat", ""]
+                        },
+                        "description": "Demande d'examens complémentaires"
+                    }
+                }
+            ]
+        },
+        {
+            "name": "🚨 Test Détection Erreurs",
+            "item": [
+                {
+                    "name": "Diagnostic Prématuré",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Token {{TOKEN}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"message\": \"C'est forcément un cancer, je suis sûr de mon diagnostic\",\n    \"session_id\": \"{{SESSION_ID}}\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{BASE_URL}}/api/tutor/chat/",
+                            "host": ["{{BASE_URL}}"],
+                            "path": ["api", "tutor", "chat", ""]
+                        },
+                        "description": "Test de détection d'erreur - diagnostic prématuré"
+                    }
+                },
+                {
+                    "name": "Prescription Sans Diagnostic",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Token {{TOKEN}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"message\": \"Je prescris des antibiotiques et de la morphine\",\n    \"session_id\": \"{{SESSION_ID}}\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{BASE_URL}}/api/tutor/chat/",
+                            "host": ["{{BASE_URL}}"],
+                            "path": ["api", "tutor", "chat", ""]
+                        },
+                        "description": "Test de détection d'erreur - prescription sans diagnostic"
+                    }
+                },
+                {
+                    "name": "Jugement du Patient",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Token {{TOKEN}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"message\": \"Le patient ment sûrement, il exagère ses symptômes\",\n    \"session_id\": \"{{SESSION_ID}}\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{BASE_URL}}/api/tutor/chat/",
+                            "host": ["{{BASE_URL}}"],
+                            "path": ["api", "tutor", "chat", ""]
+                        },
+                        "description": "Test de détection d'erreur - jugement du patient"
+                    }
+                }
+            ]
+        },
+        {
+            "name": "📊 Progression & Sessions",
+            "item": [
+                {
+                    "name": "Consulter Progression",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Token {{TOKEN}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{BASE_URL}}/api/tutor/progression/",
+                            "host": ["{{BASE_URL}}"],
+                            "path": ["api", "tutor", "progression", ""]
+                        },
+                        "description": "Consulte la progression actuelle de l'utilisateur"
+                    }
+                },
+                {
+                    "name": "Créer Nouvelle Session",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Token {{TOKEN}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"niveau_id\": \"niveau_1\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{BASE_URL}}/api/tutor/session/",
+                            "host": ["{{BASE_URL}}"],
+                            "path": ["api", "tutor", "session", ""]
+                        },
+                        "description": "Crée une nouvelle session d'apprentissage"
+                    }
+                },
+                {
+                    "name": "Terminer Session",
+                    "request": {
+                        "method": "DELETE",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Token {{TOKEN}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{BASE_URL}}/api/tutor/session/{{SESSION_ID}}/",
+                            "host": ["{{BASE_URL}}"],
+                            "path": ["api", "tutor", "session", "{{SESSION_ID}}", ""]
+                        },
+                        "description": "Termine la session actuelle"
+                    }
+                }
+            ]
+        },
+        {
+            "name": "🎮 Test Gamification",
+            "item": [
+                {
+                    "name": "Bonne Réponse 1",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Token {{TOKEN}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"message\": \"Je commence par examiner attentivement le patient\",\n    \"session_id\": \"{{SESSION_ID}}\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{BASE_URL}}/api/tutor/chat/",
+                            "host": ["{{BASE_URL}}"],
+                            "path": ["api", "tutor", "chat", ""]
+                        }
+                    }
+                },
+                {
+                    "name": "Bonne Réponse 2",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Token {{TOKEN}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"message\": \"Je prends ses constantes vitales et j'écoute ses antécédents\",\n    \"session_id\": \"{{SESSION_ID}}\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{BASE_URL}}/api/tutor/chat/",
+                            "host": ["{{BASE_URL}}"],
+                            "path": ["api", "tutor", "chat", ""]
+                        }
+                    }
+                },
+                {
+                    "name": "Bonne Réponse 3",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Token {{TOKEN}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"message\": \"Je formule plusieurs hypothèses diagnostiques avant de conclure\",\n    \"session_id\": \"{{SESSION_ID}}\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{BASE_URL}}/api/tutor/chat/",
+                            "host": ["{{BASE_URL}}"],
+                            "path": ["api", "tutor", "chat", ""]
+                        }
+                    }
+                }
+            ]
+        }
+    ]
+}

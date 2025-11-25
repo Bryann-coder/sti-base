@@ -1,5 +1,6 @@
 from .models import *
-from .tuteur_service import SystemeTuteur, GestionSession
+from .session_manager import SessionManager
+from .tuteur_service import SystemeTuteur
 from django.contrib.auth.models import User
 import uuid
 
@@ -7,6 +8,7 @@ class TutorService:
     def __init__(self, user):
         self.user = user
         self.utilisateur = self._get_or_create_utilisateur()
+        self.session_manager = SessionManager(self.utilisateur)
         self.systeme_tuteur = SystemeTuteur()
     
     def _get_or_create_utilisateur(self):
@@ -35,22 +37,17 @@ class TutorService:
             return utilisateur
     
     def handle_interaction(self, user_message, session_id=None):
-        """Point d'entrée principal pour gérer une interaction"""
+        """Point d'entrée principal - Le médecin interagit avec le système tuteur"""
         
         # Récupérer ou créer la session
         session = None
         if session_id:
-            try:
-                session = Session.objects.get(id_session=session_id, utilisateur=self.utilisateur)
-            except Session.DoesNotExist:
-                pass
+            session = self.session_manager.reprendre_session(session_id)
         
-        # Si pas de session, en créer une nouvelle
         if not session:
-            niveau = self._get_or_create_niveau_defaut()
-            session = GestionSession.creer_session(self.utilisateur, niveau.id_niveau)
+            session = self.session_manager.demarrer_nouvelle_session()
         
-        # Traiter le message avec le système tuteur
+        # Traiter le message avec le système tuteur (qui fait office de patient ET tuteur)
         resultat = self.systeme_tuteur.traiter_message(self.utilisateur, user_message, session)
         
         return {
@@ -59,7 +56,10 @@ class TutorService:
             "etoiles_gagnees": resultat['etoiles_gagnees'],
             "score_total": resultat['score_total'],
             "cas_clinique": resultat['cas_clinique'],
-            "niveau_actuel": session.niveau.nom
+            "niveau_actuel": session.niveau.nom,
+            "fin_consultation": resultat.get('fin_consultation', False),
+            "diagnostic_correct": resultat.get('diagnostic_correct', False),
+            "feedback_pedagogique": resultat.get('feedback_pedagogique', '')
         }
     
     def _get_or_create_niveau_defaut(self):
@@ -99,11 +99,48 @@ class TutorService:
             "niveau_actuel": sessions.first().niveau.nom if sessions.exists() else "Aucun"
         }
     
-    def terminer_session(self, session_id):
-        """Termine une session"""
+    def terminer_session(self, session_id, diagnostic_final=None):
+        """Termine une session manuellement"""
         try:
             session = Session.objects.get(id_session=session_id, utilisateur=self.utilisateur)
-            GestionSession.terminer_session(session)
+            self.session_manager.terminer_session(session, diagnostic_final)
             return True
         except Session.DoesNotExist:
             return False
+    
+    def _generer_feedback_final(self, session, diagnostic_correct):
+        """Génère un feedback final pour la consultation"""
+        from .llm_client import GeminiClient
+        
+        client = GeminiClient()
+        cas = session.cas_clinique
+        
+        prompt = f"""
+        Génère un feedback pédagogique pour cette consultation médicale:
+        
+        CAS: {cas.titre}
+        DIAGNOSTIC CORRECT: {cas.diagnostic_correct}
+        DIAGNOSTIC PROPOSÉ: {session.diagnostic_propose or "Aucun"}
+        SCORE: {session.score_etoiles} étoiles
+        QUESTIONS POSÉES: {len(session.questions_posees)}
+        
+        HISTORIQUE:
+        {self._formater_historique_session(session)}
+        
+        Fournis un feedback constructif sur:
+        1. La démarche diagnostique
+        2. La qualité des questions
+        3. Les points à améliorer
+        4. Les points positifs
+        
+        Sois bienveillant et pédagogique.
+        """
+        
+        return client.generate_response(prompt)
+    
+    def _formater_historique_session(self, session):
+        """Formate l'historique de la session"""
+        historique = ""
+        for interaction in session.historique_cache[-10:]:  # 10 dernières interactions
+            historique += f"{interaction['auteur']}: {interaction['message']}\n"
+        return historique

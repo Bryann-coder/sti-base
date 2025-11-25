@@ -1,52 +1,54 @@
 from django.shortcuts import render
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-from django.contrib.auth.decorators import login_required
 from django.utils.decorators import method_decorator
 from django.views import View
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
 from .services import TutorService
 import json
 
-@method_decorator(csrf_exempt, name='dispatch')
-@method_decorator(login_required, name='dispatch')
-class ChatView(View):
+class ChatView(APIView):
+    permission_classes = [IsAuthenticated]
+    
     def post(self, request):
         try:
-            data = json.loads(request.body)
+            data = request.data
             message = data.get('message', '')
             session_id = data.get('session_id')
             
             if not message:
-                return JsonResponse({'error': 'Message requis'}, status=400)
+                return Response({'error': 'Message requis'}, status=status.HTTP_400_BAD_REQUEST)
             
             tutor_service = TutorService(request.user)
             resultat = tutor_service.handle_interaction(message, session_id)
             
-            return JsonResponse({'success': True, 'data': resultat})
+            return Response({'success': True, 'data': resultat}, status=status.HTTP_200_OK)
             
-        except json.JSONDecodeError:
-            return JsonResponse({'error': 'JSON invalide'}, status=400)
         except Exception as e:
-            return JsonResponse({'error': str(e)}, status=500)
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-@method_decorator(login_required, name='dispatch')
-class ProgressionView(View):
+class ProgressionView(APIView):
+    permission_classes = [IsAuthenticated]
+    
     def get(self, request):
         try:
             tutor_service = TutorService(request.user)
             progression = tutor_service.get_progression()
-            return JsonResponse({'success': True, 'data': progression})
+            return Response({'success': True, 'data': progression}, status=status.HTTP_200_OK)
         except Exception as e:
-            return JsonResponse({'error': str(e)}, status=500)
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-@method_decorator(csrf_exempt, name='dispatch')
-@method_decorator(login_required, name='dispatch')
-class SessionView(View):
+class SessionView(APIView):
+    permission_classes = [IsAuthenticated]
+    
     def post(self, request):
         try:
-            return JsonResponse({'success': True, 'message': 'Prêt pour une nouvelle session'})
+            return Response({'success': True, 'message': 'Prêt pour une nouvelle session'}, status=status.HTTP_200_OK)
         except Exception as e:
-            return JsonResponse({'error': str(e)}, status=500)
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     def delete(self, request, session_id):
         try:
@@ -54,8 +56,8 @@ class SessionView(View):
             success = tutor_service.terminer_session(session_id)
             
             if success:
-                return JsonResponse({'success': True, 'message': 'Session terminée'})
+                return Response({'success': True, 'message': 'Session terminée'}, status=status.HTTP_200_OK)
             else:
-                return JsonResponse({'error': 'Session non trouvée'}, status=404)
+                return Response({'error': 'Session non trouvée'}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
-            return JsonResponse({'error': str(e)}, status=500)
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

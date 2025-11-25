@@ -133,6 +133,9 @@ class Session(models.Model):
     objectif_session = models.TextField()
     premiere_fois = models.BooleanField(default=True)
     interactions = models.ManyToManyField(Interaction, blank=True)
+    historique_cache = models.JSONField(default=list)
+    diagnostic_propose = models.CharField(max_length=500, blank=True)
+    questions_posees = models.JSONField(default=list)
     
     def ajouter_interaction(self, interaction):
         self.interactions.add(interaction)
@@ -175,3 +178,24 @@ class Gamification(models.Model):
         if progression:
             return progression.etoiles_niveau >= self.seuil_passage_niveau
         return False
+
+class HistoriqueSession(models.Model):
+    id_historique = models.CharField(max_length=50, primary_key=True)
+    utilisateur = models.ForeignKey(Utilisateur, on_delete=models.CASCADE)
+    sessions_completees = models.JSONField(default=list)
+    derniere_activite = models.DateTimeField(default=timezone.now)
+    historique_complet = models.JSONField(default=list)
+    
+    def ajouter_resultat(self, session):
+        self.sessions_completees.append({
+            'session_id': session.id_session,
+            'score': session.score_etoiles,
+            'date': session.date_fin.isoformat() if session.date_fin else None,
+            'cas_clinique': session.cas_clinique.titre if session.cas_clinique else None,
+            'diagnostic_correct': session.cas_clinique.diagnostic_correct if session.cas_clinique else None,
+            'diagnostic_propose': session.diagnostic_propose
+        })
+        self.save()
+    
+    def obtenir_historique_complet(self):
+        return self.historique_complet

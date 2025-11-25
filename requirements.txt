@@ -1,0 +1,11 @@
+asgiref==3.11.0
+Django==5.2.8
+django-js-asset==3.1.2
+django-mptt==0.18.0
+sqlparse==0.5.3
+
+# Project dependencies discovered by scanning imports
+djangorestframework
+python-dotenv
+google-generativeai
+mysqlclient

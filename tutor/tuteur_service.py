@@ -1,7 +1,12 @@
 from .models import *
-from .llm_client import GeminiClient
+try:
+    from .llm_client import GeminiClient
+except ImportError:
+    from .llm_mock import MockGeminiClient as GeminiClient
+    print("⚠️  Utilisation du mock LLM (dépendances manquantes)")
 import uuid
 from django.utils import timezone
+import json
 
 class SystemeTuteur:
     def __init__(self):
@@ -58,19 +63,53 @@ class SystemeTuteur:
         # Ajout des interactions à la session
         session.ajouter_interaction(interaction)
         session.ajouter_interaction(reponse_interaction)
+        
+        # Mise à jour du cache historique
+        if not hasattr(session, 'historique_cache') or session.historique_cache is None:
+            session.historique_cache = []
+        
+        session.historique_cache.extend([
+            {
+                'auteur': interaction.auteur,
+                'message': interaction.message,
+                'timestamp': interaction.timestamp.isoformat(),
+                'type': interaction.type_message
+            },
+            {
+                'auteur': reponse_interaction.auteur,
+                'message': reponse_interaction.message,
+                'timestamp': reponse_interaction.timestamp.isoformat(),
+                'type': reponse_interaction.type_message
+            }
+        ])
+        
         session.premiere_fois = False
-        session.save()
+        
+        # Gestion de la fin de consultation
+        fin_consultation = reponse.get('fin_consultation', False)
+        diagnostic_correct = False
+        
+        if fin_consultation and reponse.get('diagnostic_propose'):
+            session.diagnostic_propose = reponse['diagnostic_propose']
+            diagnostic_correct = session.cas_clinique.verifier_diagnostic(reponse['diagnostic_propose']) if session.cas_clinique else False
         
         # Attribution d'étoiles
-        etoiles = self.gamification.calculer_etoiles(reponse.get('evaluation', {}))
+        etoiles = self.gamification.calculer_etoiles({'score': 4 if not erreurs_detectees else 2})
         session.score_etoiles += etoiles
         session.save()
+        
+        # Si fin de consultation, terminer la session
+        if fin_consultation:
+            session.terminer_session()
         
         return {
             'reponse': reponse['message'],
             'etoiles_gagnees': etoiles,
             'score_total': session.score_etoiles,
-            'cas_clinique': session.cas_clinique.titre if session.cas_clinique else None
+            'cas_clinique': session.cas_clinique.titre if session.cas_clinique else None,
+            'fin_consultation': fin_consultation,
+            'diagnostic_correct': diagnostic_correct,
+            'feedback_pedagogique': reponse.get('feedback_pedagogique', '')
         }
 
 class DetecteurErreur:
@@ -142,36 +181,99 @@ class SystemePedagogique:
         }
     
     def generer_reponse(self, interaction, session):
-        """Génère une réponse pédagogique adaptée"""
+        """Génère une réponse du système tuteur (patient virtuel + pédagogie)"""
         
         cas = session.cas_clinique
-        historique = session.obtenir_historique_session()
+        historique = session.historique_cache if hasattr(session, 'historique_cache') else []
+        profil = session.utilisateur.profil
         
-        # Construction du contexte pour l'IA
-        contexte_historique = ""
-        for inter in historique[-3:]:  # 3 dernières interactions
-            contexte_historique += f"{inter.auteur}: {inter.message}\n"
+        # Détecter si c'est une fin de consultation
+        fin_consultation = self._detecter_fin_consultation(interaction.message)
+        diagnostic_propose = self._extraire_diagnostic(interaction.message) if fin_consultation else None
+        
+        # Construction du contexte complet pour l'IA
+        contexte_historique = self._formater_historique(historique)
         
         prompt = f"""
-        Tu es un tuteur médical intelligent. Voici le contexte:
+        Tu es un SYSTÈME TUTEUR INTELLIGENT qui simule un patient ET guide l'apprentissage.
         
-        CAS CLINIQUE:
-        - Titre: {cas.titre if cas else 'Cas général'}
-        - Description: {cas.description if cas else 'Formation générale'}
-        - État mental du patient: {cas.etat_mental_patient if cas else 'Stable'}
+        CONTEXTE DU CAS:
+        - Patient: {cas.titre if cas else 'Patient général'}
+        - Symptômes réels: {cas.symptomes if cas else 'Symptômes généraux'}
+        - Diagnostic correct: {cas.diagnostic_correct if cas else 'Non défini'}
+        - État mental: {cas.etat_mental_patient if cas else 'Coopératif'}
         
-        HISTORIQUE RÉCENT:
+        PROFIL APPRENANT:
+        - Niveau: {profil.niveau_expertise}
+        - Spécialité: {profil.specialite}
+        
+        HISTORIQUE CONSULTATION:
         {contexte_historique}
         
-        MESSAGE ÉTUDIANT: {interaction.message}
+        QUESTION/ACTION MÉDECIN: "{interaction.message}"
         
-        Réponds comme un tuteur bienveillant qui guide l'étudiant vers la bonne réponse.
-        Termine par une question pour vérifier sa compréhension.
-        Reste dans le contexte médical et du cas clinique.
+        INSTRUCTIONS:
+        1. Si c'est une question médicale normale:
+           - Réponds comme le PATIENT avec les symptômes du cas
+           - Ajoute des conseils pédagogiques discrets
+           - Guide vers les bonnes questions si nécessaire
+        
+        2. Si c'est un diagnostic ou une conclusion:
+           - Évalue la justesse du diagnostic
+           - Donne un feedback pédagogique détaillé
+           - Explique les points forts et à améliorer
+        
+        3. Si c'est une erreur médicale:
+           - Corrige avec bienveillance
+           - Explique pourquoi c'est incorrect
+           - Propose la bonne approche
+        
+        Réponds de manière naturelle et pédagogique.
         """
         
         client = GeminiClient()
-        return client.generate_response(prompt)
+        reponse = client.generate_response(prompt)
+        
+        return {
+            'message': reponse,
+            'fin_consultation': fin_consultation,
+            'diagnostic_propose': diagnostic_propose
+        }
+    
+    def _detecter_fin_consultation(self, message):
+        """Détecte si le médecin termine la consultation"""
+        mots_cles_fin = [
+            'diagnostic', 'conclusion', 'prescription', 'traitement',
+            'au revoir', 'merci', 'terminé', 'fini', 'ordonnance',
+            'je pense que', 'mon diagnostic', 'je conclus'
+        ]
+        
+        message_lower = message.lower()
+        return any(mot in message_lower for mot in mots_cles_fin)
+    
+    def _extraire_diagnostic(self, message):
+        """Extrait le diagnostic proposé par le médecin"""
+        # Logique simple d'extraction
+        message_lower = message.lower()
+        if 'grippe' in message_lower:
+            return 'Grippe'
+        elif 'infarctus' in message_lower:
+            return 'Infarctus du myocarde'
+        elif 'angine' in message_lower:
+            return 'Angine de poitrine'
+        # Ajouter d'autres diagnostics courants
+        return message  # Retourner le message complet si pas de correspondance
+    
+    def _formater_historique(self, historique):
+        """Formate l'historique pour le prompt"""
+        if not historique:
+            return "Début de consultation"
+        
+        historique_str = ""
+        for interaction in historique[-5:]:  # 5 dernières interactions
+            historique_str += f"{interaction.get('auteur', 'Inconnu')}: {interaction.get('message', '')}\n"
+        
+        return historique_str
 
 class SelecteurCas:
     def __init__(self):
