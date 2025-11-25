@@ -142,9 +142,11 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework.authentication.TokenAuthentication',
+        #'rest_framework.authentication.SessionAuthentication', # Ajout important pour les cookies
+        'rest_framework.authentication.TokenAuthentication',   # On le garde en fallback si besoin
+        'learner.authentication.CsrfExemptSessionAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.IsAuthenticated',   
+        'rest_framework.permissions.IsAuthenticated',
     ]
 }

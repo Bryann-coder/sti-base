@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework import status
 from rest_framework.authtoken.models import Token
-from django.contrib.auth import authenticate
+from django.contrib.auth import authenticate, login, logout
 
 from .serializers import (
     InteractionInputSerializer, 
@@ -39,19 +39,20 @@ class LoginView(APIView):
         if serializer.is_valid():
             username = serializer.validated_data['username']
             password = serializer.validated_data['password']
-            user = authenticate(username=username, password=password)
+            user = authenticate(request=request, username=username, password=password)
 
             if user:
-                token, created = Token.objects.get_or_create(user=user)
+                # C'est cette ligne qui crée la session (cookie)
+                login(request, user)
+                
                 return Response({
-                    "token": token.key,
+                    "message": "Connexion réussie.",
                     "user_id": user.pk,
                     "username": user.username,
                     "nom": user.last_name,
                     "prenom": user.first_name,
-                    # On peut renvoyer des infos du profil aussi
-                    "specialite": user.learnerprofile.specialite
-                })
+                    "specialite": getattr(user.learnerprofile, 'specialite', '')
+                }, status=status.HTTP_200_OK)
             else:
                 return Response({"error": "Identifiants invalides"}, status=status.HTTP_400_BAD_REQUEST)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -80,3 +81,9 @@ class TutorInteractionView(APIView):
         # 4. Réponse
         output_serializer = InteractionOutputSerializer(response_data)
         return Response(output_serializer.data, status=status.HTTP_200_OK)
+    
+
+class LogoutView(APIView):
+    def post(self, request):
+        logout(request)
+        return Response({"message": "Déconnexion réussie."}, status=status.HTTP_200_OK)
