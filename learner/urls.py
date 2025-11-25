@@ -1,6 +1,8 @@
 from django.urls import path
-from .views import TutorInteractionView
+from .views import TutorInteractionView, RegisterView, LoginView
 
 urlpatterns = [
+    path('register/', RegisterView.as_view(), name='register'),
+    path('login/', LoginView.as_view(), name='login'),
     path('interact/', TutorInteractionView.as_view(), name='tutor-interaction'),
 ]

@@ -1,12 +1,62 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework import status
+from rest_framework.authtoken.models import Token
+from django.contrib.auth import authenticate
 
-from .serializers import InteractionInputSerializer, InteractionOutputSerializer
+from .serializers import (
+    InteractionInputSerializer, 
+    InteractionOutputSerializer, 
+    RegisterSerializer, 
+    LoginSerializer
+)
 from .models import LearnerProfile
-from tutor.services import TutorService # On importe le cerveau !
+from tutor.services import TutorService
 
+# --- Vue d'Inscription ---
+class RegisterView(APIView):
+    permission_classes = [AllowAny] # Tout le monde peut s'inscrire
+
+    def post(self, request):
+        serializer = RegisterSerializer(data=request.data)
+        if serializer.is_valid():
+            user = serializer.save()
+            token, created = Token.objects.get_or_create(user=user)
+            return Response({
+                "token": token.key,
+                "user_id": user.pk,
+                "email": user.email
+            }, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+# --- Vue de Connexion ---
+class LoginView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = LoginSerializer(data=request.data)
+        if serializer.is_valid():
+            username = serializer.validated_data['username']
+            password = serializer.validated_data['password']
+            user = authenticate(username=username, password=password)
+
+            if user:
+                token, created = Token.objects.get_or_create(user=user)
+                return Response({
+                    "token": token.key,
+                    "user_id": user.pk,
+                    "username": user.username,
+                    "nom": user.last_name,
+                    "prenom": user.first_name,
+                    # On peut renvoyer des infos du profil aussi
+                    "specialite": user.learnerprofile.specialite
+                })
+            else:
+                return Response({"error": "Identifiants invalides"}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+# --- Vue existante (Interaction Tuteur) ---
 class TutorInteractionView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -16,20 +66,17 @@ class TutorInteractionView(APIView):
         if not input_serializer.is_valid():
             return Response(input_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        # 2. Récupérer le profil de l'apprenant
+        # 2. Récupérer le profil
         try:
             learner_profile = LearnerProfile.objects.get(user=request.user)
         except LearnerProfile.DoesNotExist:
-            # Créer le profil s'il n'existe pas
-            learner_profile = LearnerProfile.objects.create(user=request.user)
+            return Response({"error": "Profil introuvable"}, status=status.HTTP_404_NOT_FOUND)
 
-        # 3. Déléguer toute la logique au module Tutor
+        # 3. Service Tuteur
         user_message = input_serializer.validated_data['message']
-        
-        # Le service Tutor prend le contrôle
         tutor_service = TutorService(learner_profile)
         response_data = tutor_service.handle_interaction(user_message)
 
-        # 4. Formater et renvoyer la réponse
+        # 4. Réponse
         output_serializer = InteractionOutputSerializer(response_data)
         return Response(output_serializer.data, status=status.HTTP_200_OK)
